@@ -449,7 +449,7 @@ if page == PAGES[0]:
             out_rows.append({
                 "column": col,
                 "outlier_count": n_out,
-                "outlier_%": round(n_out / len(s) * 100, 2)
+                "outlier_%": round(n_out / len(s) * 100, 2) if len(s) > 0 else 0
             })
         st.dataframe(pd.DataFrame(out_rows), use_container_width=True, hide_index=True)
 
