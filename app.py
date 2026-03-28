@@ -510,11 +510,84 @@ elif page == PAGES[1]:
                             temperature=0.3,
                         )
                         ai_suggestion = response.choices[0].message.content.strip()
-                        st.info(ai_suggestion)
-                        st.warning("⚠️ This is an AI suggestion — review before applying.")
-                        st.success("👇 Go to the section below to apply this operation manually.")
+                        st.session_state["ai_suggestion"] = ai_suggestion
+                        st.session_state["ai_nl_command"] = nl_command
                     except Exception as e:
                         st.warning(f"⚠️ AI error: {e}")
+
+        if st.session_state.get("ai_suggestion"):
+            ai_suggestion = st.session_state["ai_suggestion"]
+            st.info(ai_suggestion)
+            st.warning("⚠️ This is an AI suggestion — review before applying.")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Confirm & Apply", key="ai_confirm_btn"):
+                    new_df = wdf().copy()
+                    lines = ai_suggestion.lower()
+                    import re
+                    col_match = re.search(r"columns?:\s*(.+)", ai_suggestion, re.IGNORECASE)
+                    cols_raw = col_match.group(1).strip() if col_match else ""
+                    detected_cols = []
+                    for c in cols_raw.split(","):
+                        cleaned = c.strip().strip("[]'\"").strip()
+                        if cleaned in new_df.columns:
+                            detected_cols.append(cleaned)
+                    if not detected_cols:
+                        detected_cols = new_df.select_dtypes(include="number").columns.tolist()
+                
+                    applied = False
+                    st.write("DEBUG - detected_cols:", detected_cols)
+                    st.write("DEBUG - lines contains:", "fill missing" in lines, "median" in lines)
+                    if "fill missing" in lines or "fillna" in lines or "missing values" in lines:
+
+                        if "median" in lines:
+                            for c in detected_cols:
+                                if pd.api.types.is_numeric_dtype(new_df[c]):
+                                    new_df[c] = new_df[c].fillna(new_df[c].median())
+                            log_step("AI: Fill missing (median)", {"columns": detected_cols})
+                            applied = True
+                        elif "mean" in lines:
+                            for c in detected_cols:
+                                if pd.api.types.is_numeric_dtype(new_df[c]):
+                                    new_df[c] = new_df[c].fillna(new_df[c].mean())
+                            log_step("AI: Fill missing (mean)", {"columns": detected_cols})
+                            applied = True
+                        elif "mode" in lines:
+                            for c in detected_cols:
+                                new_df[c] = new_df[c].fillna(new_df[c].mode()[0])
+                            log_step("AI: Fill missing (mode)", {"columns": detected_cols})
+                            applied = True
+                    if "lower" in lines or "casing" in lines or "standardize" in lines:
+                        for c in detected_cols:
+                            if new_df[c].dtype == object or str(new_df[c].dtype) == "string":
+                                new_df[c] = new_df[c].str.lower().str.strip()
+                        log_step("AI: Standardize casing", {"columns": detected_cols})
+                        applied = True
+                    if "drop" in lines and "duplicates" in lines:
+                        new_df = new_df.drop_duplicates()
+                        log_step("AI: Drop duplicates", {})
+                        applied = True
+                    if "numeric" in lines or "convert" in lines:
+                        for c in detected_cols:
+                            try:
+                               new_df[c] = pd.to_numeric(new_df[c], errors="coerce")
+                            except Exception:
+                                pass
+                        log_step("AI: Convert to numeric", {"columns": detected_cols})
+                        applied = True    
+                    if applied:
+                        set_wdf(new_df)
+                        st.session_state["ai_suggestion"] = None
+                        st.success("✅ Applied successfully!")
+                        st.rerun()
+                    else:
+                        st.session_state["ai_suggestion"] = None
+                        st.warning("⚠️ Could not auto-apply. Please apply manually below.")
+                        st.rerun()
+            with col2:
+                if st.button("❌ Dismiss", key="ai_dismiss_btn"):
+                    st.session_state["ai_suggestion"] = None
+                    st.rerun()
     else:
         st.info("🔑 Add Groq API key in sidebar to enable AI cleaning suggestions.")
         if st.session_state.transform_log:
@@ -524,7 +597,7 @@ elif page == PAGES[1]:
                 undo_last()
                 st.rerun()
         else:
-            st.info("No transformations applied yet.")
+            st.info("No transformations applied yet.")                        
 
     st.divider()
 
